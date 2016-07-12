@@ -15,4 +15,6 @@ Dependencies
 Building
 --------
 
-  make
+```bash
+make
+```
