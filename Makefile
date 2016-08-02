@@ -3,7 +3,7 @@
 
 CFLAGS :=
 CFLAGS += -Wall -Wextra
-CFLAGS += -std=c99 -pedantic -g
+CFLAGS += -std=gnu99 -pedantic -g
 CLFAGS += -pipe
 
 LIBS=-lcurl

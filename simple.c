@@ -5,8 +5,8 @@
 #include <string.h>
 #include <errno.h>
 
-struct string {
-	char   *ptr;
+struct content {
+	char   *data;
 	size_t  len;
 };
 struct headers {
@@ -15,33 +15,45 @@ struct headers {
 	size_t   len;
 };
 
-void init_string(struct string *s)
+int init_content(struct content *c)
 {
-	s->len = 0;
-	s->ptr = malloc(s->len+1);
-	if (s->ptr == NULL) {
+	c->len = 0;
+	if ((c->data = malloc(c->len + 1)) == NULL) {
 		fprintf(stderr, "malloc() failed\n");
-		exit(EXIT_FAILURE);
+		return 1;
 	}
-	s->ptr[0] = '\0';
+	c->data[0] = '\0';
+	return 0;
 }
 
-void init_headers(struct headers *h)
+int init_headers(struct headers *h)
 {
 	h->len = 0;
-	h->k = malloc(sizeof(char *) * 10);
-	h->v = malloc(sizeof(char *) * 10);
+	if ((h->k = malloc(sizeof(char *) * 10)) == NULL) {
+		return 1;
+	}
+	if ((h->v = malloc(sizeof(char *) * 10)) == NULL) {
+		return 1;
+	}
+	return 0;
 }
 
-void add_header(struct headers *h, const char *k, const char *v)
+int add_header(struct headers *h, const char *k, const char *v)
 {
 	if (h->len % 10 == 7) {
-		h->k = realloc(h->k, sizeof(char *) * (h->len + 3 + 10));
-		h->v = realloc(h->v, sizeof(char *) * (h->len + 3 + 10));
+		if ((h->k = realloc(h->k, sizeof(char *) * (h->len + 3 + 10))) == NULL) {
+
+			return 1;
+		}
+		if ((h->v = realloc(h->v, sizeof(char *) * (h->len + 3 + 10))) == NULL) {
+
+			return 1;
+		}
 	}
 	h->k[h->len] = strdup(k);
 	h->v[h->len] = strdup(v);
 	h->len++;
+	return 0;
 }
 
 static char * get_header(struct headers *h, const char *k)
@@ -61,23 +73,21 @@ static char ** get_idx(struct headers *h, int k)
 	}
 	return NULL;
 }
-static size_t writer(void *buf, size_t each, size_t n, struct string *s)
+static size_t buffer_content(void *buf, size_t each, size_t n, struct content *c)
 {
-	if (s == NULL) printf("poop\n");
-	size_t new_len = s->len + each * n;
-	s->ptr = realloc(s->ptr, new_len + 1);
-	if (s->ptr == NULL) {
-		fprintf(stderr, "realloc() failed\n");
-		exit(EXIT_FAILURE);
+	size_t new_len = c->len + each * n;
+	c->data = realloc(c->data, new_len + 1);
+	if (c->data == NULL) {
+		
+		return 0;
 	}
-	memcpy(s->ptr+s->len, buf, each * n);
-	s->ptr[new_len] = '\0';
-	s->len = new_len;
-
+	memcpy(c->data + c->len, buf, each * n);
+	c->data[new_len] = '\0';
+	c->len = new_len;
 	return each * n;
 }
 
-static size_t header(char *buf, size_t each, size_t n, struct headers *h)
+static size_t buffer_headers(char *buf, size_t each, size_t n, struct headers *h)
 {
 	if (strcmp(buf, "\r\n") == 0) return each * n;
 	char *token = strdup(buf);
@@ -101,9 +111,10 @@ int main(int argc, char *argv[])
 	if (argc > 2) {
 		agent = strdup(argv[2]);
 	}
+	int res;
 	CURL *ua;
-	if (curl_global_init(CURL_GLOBAL_SSL) != 0) {
-		fprintf(stderr, "failed to globalize curl, %s\n", strerror(errno));
+	if ((res = curl_global_init(CURL_GLOBAL_SSL)) != 0) {
+		fprintf(stderr, "failed to globalize curl, %s\n", curl_easy_strerror(res));
 		return 1;
 	}
 	if ((ua = curl_easy_init()) == NULL) {
@@ -111,20 +122,22 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	struct string s;
-	init_string(&s);
+	struct content c;
+	init_content(&c);
 	struct headers h;
 	init_headers(&h);
 
 	curl_easy_setopt(ua, CURLOPT_USERAGENT, agent);
 	curl_easy_setopt(ua, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
-	curl_easy_setopt(ua, CURLOPT_HEADERFUNCTION, header);
+	curl_easy_setopt(ua, CURLOPT_HEADERFUNCTION, buffer_headers);
 	curl_easy_setopt(ua, CURLOPT_HEADERDATA, &h);
-	curl_easy_setopt(ua, CURLOPT_WRITEFUNCTION, writer);
-	curl_easy_setopt(ua, CURLOPT_WRITEDATA, &s);
+	curl_easy_setopt(ua, CURLOPT_WRITEFUNCTION, buffer_content);
+	curl_easy_setopt(ua, CURLOPT_WRITEDATA, &c);
 	curl_easy_setopt(ua, CURLOPT_URL, address);
-	if (curl_easy_perform(ua) != 0)
-		fprintf(stderr, "failed to get %s, %s", address, strerror(errno));
+	if ((res = curl_easy_perform(ua)) != 0) {
+		fprintf(stderr, "failed to get %s, %s", address, curl_easy_strerror(res));
+		return 1;
+	}
 
 	for (int i=0; i < h.len; i++) {
 		char **header = get_idx(&h, i);
